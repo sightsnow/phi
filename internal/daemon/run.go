@@ -2,14 +2,15 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"phi/internal/control"
 	"phi/internal/platform"
 )
 
-func Run(ctx context.Context, controlPath, vaultPath string) error {
-	network, address, err := platform.ControlEndpoint(controlPath)
+func Run(ctx context.Context) error {
+	network, address, err := platform.ControlEndpoint(platform.DefaultControlPath())
 	if err != nil {
 		return err
 	}
@@ -18,6 +19,15 @@ func Run(ctx context.Context, controlPath, vaultPath string) error {
 			return err
 		}
 	}
+	lock, err := acquireInstanceLock(network, address)
+	if err != nil {
+		if errors.Is(err, ErrAlreadyRunning) {
+			return nil
+		}
+		return err
+	}
+	defer lock.release()
+
 	listener, err := control.Listen(network, address)
 	if err != nil {
 		return err
@@ -33,7 +43,6 @@ func Run(ctx context.Context, controlPath, vaultPath string) error {
 		PID:            os.Getpid(),
 		ControlNetwork: network,
 		ControlAddress: address,
-		VaultPath:      vaultPath,
 	}, cancel)
 	return control.Serve(runCtx, listener, service)
 }

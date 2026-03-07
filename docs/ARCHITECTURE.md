@@ -13,7 +13,7 @@
 运行时最重要的对象只有三个：
 
 - `phi`：唯一可执行文件
-- `config.toml`：本地配置，主要保存同步配置
+- `config.toml`：本地配置，只保存同步配置
 - `vault.phi`：加密后的 Vault 数据库
 
 约束：
@@ -34,6 +34,7 @@
 
 2. `phi unlock`
    - 启动后台 daemon
+   - 若 daemon 已存在则直接复用；同一用户目录只维护一个本地 daemon 实例
    - 解锁 Vault
    - 启动本地 SSH agent
 
@@ -73,7 +74,7 @@ agent 只提供只读能力：
 默认端点：
 
 - Linux / macOS：`~/.phi/agent.sock`
-- Windows：`\\.\pipe\phi-agent`
+- Windows：`\\.\pipe\phi-agent-<user-sid>`（按当前用户隔离）
 
 因此只要让 `OpenSSH` 指向该端点，`ssh`、`git`、`scp`、`VSCode Remote SSH` 就可以直接复用 `phi`。
 

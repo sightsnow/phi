@@ -1,9 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -12,13 +13,7 @@ import (
 )
 
 type Config struct {
-	VaultPath string        `toml:"vault_path,omitempty"`
-	Control   ControlConfig `toml:"control,omitempty"`
-	Sync      SyncConfig    `toml:"sync,omitempty"`
-}
-
-type ControlConfig struct {
-	Path string `toml:"path,omitempty"`
+	Sync SyncConfig `toml:"sync,omitempty"`
 }
 
 type SyncConfig struct {
@@ -44,39 +39,14 @@ type WebDAVConfig struct {
 }
 
 func Default() Config {
-	return DefaultForPath(platform.DefaultConfigPath())
-}
-
-func DefaultForPath(path string) Config {
-	if path == "" || samePath(path, platform.DefaultConfigPath()) {
-		return Config{
-			VaultPath: platform.DefaultVaultPath(),
-			Control: ControlConfig{
-				Path: platform.DefaultControlPath(),
-			},
-			Sync: SyncConfig{},
-		}
-	}
-
-	baseDir := filepath.Dir(path)
-	controlPath := platform.DefaultControlPath()
-	if runtime.GOOS != "windows" {
-		controlPath = filepath.Join(baseDir, "control.sock")
-	}
-	return Config{
-		VaultPath: filepath.Join(baseDir, "vault.phi"),
-		Control: ControlConfig{
-			Path: controlPath,
-		},
-		Sync: SyncConfig{},
-	}
+	return Config{}
 }
 
 func Load(path string) (Config, error) {
 	if path == "" {
 		path = platform.DefaultConfigPath()
 	}
-	cfg := DefaultForPath(path)
+	cfg := Default()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -86,10 +56,14 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	decoder := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		var strictErr *toml.StrictMissingError
+		if errors.As(err, &strictErr) {
+			return Config{}, fmt.Errorf("config.toml only supports [sync]; path settings are not allowed: %w", err)
+		}
 		return Config{}, err
 	}
-	cfg.applyDefaults(path)
 	return cfg, nil
 }
 
@@ -97,7 +71,6 @@ func WriteDefault(path string) (Config, error) {
 	if path == "" {
 		path = platform.DefaultConfigPath()
 	}
-	cfg := DefaultForPath(path)
 	if err := platform.EnsureParentDir(path); err != nil {
 		return Config{}, err
 	}
@@ -109,7 +82,7 @@ func WriteDefault(path string) (Config, error) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return Config{}, err
 	}
-	return cfg, nil
+	return Config{}, nil
 }
 
 func Save(path string, cfg Config) error {
@@ -119,7 +92,7 @@ func Save(path string, cfg Config) error {
 	if err := platform.EnsureParentDir(path); err != nil {
 		return err
 	}
-	writeCfg := cfg.prepareForWrite(path)
+	writeCfg := cfg.prepareForWrite()
 	data, err := toml.Marshal(writeCfg)
 	if err != nil {
 		return err
@@ -127,15 +100,8 @@ func Save(path string, cfg Config) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-func (c Config) prepareForWrite(path string) Config {
-	defaults := DefaultForPath(path)
+func (c Config) prepareForWrite() Config {
 	out := c
-	if samePath(out.VaultPath, defaults.VaultPath) {
-		out.VaultPath = ""
-	}
-	if samePath(out.Control.Path, defaults.Control.Path) {
-		out.Control.Path = ""
-	}
 	switch strings.ToLower(strings.TrimSpace(out.Sync.Backend)) {
 	case "s3":
 		out.Sync.WebDAV = WebDAVConfig{}
@@ -143,18 +109,4 @@ func (c Config) prepareForWrite(path string) Config {
 		out.Sync.S3 = S3Config{}
 	}
 	return out
-}
-
-func (c *Config) applyDefaults(path string) {
-	defaults := DefaultForPath(path)
-	if c.VaultPath == "" {
-		c.VaultPath = defaults.VaultPath
-	}
-	if c.Control.Path == "" {
-		c.Control.Path = defaults.Control.Path
-	}
-}
-
-func samePath(a, b string) bool {
-	return filepath.Clean(a) == filepath.Clean(b)
 }

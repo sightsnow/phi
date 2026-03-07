@@ -10,6 +10,7 @@ import (
 	"phi/internal/control"
 	"phi/internal/crypto"
 	"phi/internal/model"
+	"phi/internal/platform"
 	"phi/internal/session"
 	storesqlite "phi/internal/store/sqlite"
 )
@@ -31,7 +32,6 @@ type Options struct {
 	PID            int
 	ControlNetwork string
 	ControlAddress string
-	VaultPath      string
 }
 
 func NewService(opts Options, shutdown context.CancelFunc) *Service {
@@ -40,7 +40,7 @@ func NewService(opts Options, shutdown context.CancelFunc) *Service {
 		controlNetwork: opts.ControlNetwork,
 		controlAddress: opts.ControlAddress,
 		agentAddress:   vaultagent.DefaultSocketPath(opts.ControlAddress),
-		vaultPath:      opts.VaultPath,
+		vaultPath:      platform.DefaultVaultPath(),
 		shutdown:       shutdown,
 		pid:            opts.PID,
 	}

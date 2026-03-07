@@ -26,7 +26,7 @@ func DefaultVaultPath() string {
 
 func DefaultControlPath() string {
 	if runtime.GOOS == "windows" {
-		return "npipe://./pipe/phi-control"
+		return "npipe://./pipe/" + defaultWindowsNamedPipeName("phi-control")
 	}
 	return filepath.Join(AppDir(), "control.sock")
 }
@@ -89,7 +89,7 @@ func normalizeNamedPipePath(value string) string {
 	value = strings.TrimPrefix(value, `\\.\pipe\`)
 	value = strings.TrimLeft(strings.ReplaceAll(value, "/", `\`), `\`)
 	if value == "" {
-		value = "phi-control"
+		value = defaultWindowsNamedPipeName("phi-control")
 	}
 	return `\\.\pipe\` + value
 }

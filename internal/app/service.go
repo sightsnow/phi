@@ -22,10 +22,10 @@ import (
 var (
 	ErrInitPassphraseRequired = errors.New("vault passphrase is required to initialize the vault")
 	ErrDaemonNotRunning       = errors.New("daemon is not running; run phi unlock")
+	errDaemonNotReady         = errors.New("daemon is not ready")
 )
 
 type InitResult struct {
-	Config        config.Config
 	ConfigCreated bool
 	VaultCreated  bool
 }
@@ -48,29 +48,24 @@ func (s *Service) Init(ctx context.Context, passphrase []byte) (InitResult, erro
 	resolvedPath := platform.DefaultConfigPath()
 	result := InitResult{}
 
-	var cfg config.Config
-	var err error
 	if platform.Exists(resolvedPath) {
-		cfg, err = config.Load(resolvedPath)
-		if err != nil {
+		if _, err := config.Load(resolvedPath); err != nil {
 			return InitResult{}, err
 		}
 	} else {
-		cfg, err = config.WriteDefault(resolvedPath)
-		if err != nil {
+		if _, err := config.WriteDefault(resolvedPath); err != nil {
 			return InitResult{}, err
 		}
 		result.ConfigCreated = true
 	}
-	result.Config = cfg
-
-	if platform.Exists(cfg.VaultPath) {
+	vaultPath := platform.DefaultVaultPath()
+	if platform.Exists(vaultPath) {
 		return result, nil
 	}
 	if len(passphrase) == 0 {
 		return result, ErrInitPassphraseRequired
 	}
-	if err := storesqlite.Create(ctx, cfg.VaultPath, passphrase); err != nil {
+	if err := storesqlite.Create(ctx, vaultPath, passphrase); err != nil {
 		return InitResult{}, err
 	}
 	result.VaultCreated = true
@@ -78,11 +73,7 @@ func (s *Service) Init(ctx context.Context, passphrase []byte) (InitResult, erro
 }
 
 func (s *Service) Status(ctx context.Context) (model.DaemonStatus, error) {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return model.DaemonStatus{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.DaemonStatus{}, err
 	}
@@ -97,30 +88,34 @@ func (s *Service) Status(ctx context.Context) (model.DaemonStatus, error) {
 }
 
 func (s *Service) Unlock(ctx context.Context, passphrase []byte) (model.DaemonStatus, error) {
-	cfg, err := s.loadConfig()
+	started, err := s.ensureDaemon(ctx)
 	if err != nil {
 		return model.DaemonStatus{}, err
 	}
-	if err := s.ensureDaemon(ctx, cfg); err != nil {
-		return model.DaemonStatus{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.DaemonStatus{}, err
 	}
 	var status model.DaemonStatus
-	if err := client.Call(ctx, control.ActionUnlock, control.UnlockRequest{Passphrase: passphrase}, &status); err != nil {
+	call := func() error {
+		return client.Call(ctx, control.ActionUnlock, control.UnlockRequest{Passphrase: passphrase}, &status)
+	}
+	if started {
+		err = retryDialError(ctx, 5*time.Second, call)
+	} else {
+		err = call()
+	}
+	if err != nil {
+		if errors.Is(err, errDaemonNotReady) {
+			return model.DaemonStatus{}, errors.New("daemon startup timeout")
+		}
 		return model.DaemonStatus{}, err
 	}
 	return status, nil
 }
 
 func (s *Service) Lock(ctx context.Context) error {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return err
 	}
@@ -134,11 +129,7 @@ func (s *Service) Lock(ctx context.Context) error {
 }
 
 func (s *Service) ChangePassphrase(ctx context.Context, passphrase []byte) error {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return err
 	}
@@ -152,11 +143,7 @@ func (s *Service) ChangePassphrase(ctx context.Context, passphrase []byte) error
 }
 
 func (s *Service) AgentStatus(ctx context.Context) (control.AgentStatusResponse, error) {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return control.AgentStatusResponse{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return control.AgentStatusResponse{}, err
 	}
@@ -171,11 +158,7 @@ func (s *Service) AgentStatus(ctx context.Context) (control.AgentStatusResponse,
 }
 
 func (s *Service) ListKeys(ctx context.Context) ([]model.KeySummary, error) {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return nil, err
 	}
@@ -190,11 +173,7 @@ func (s *Service) ListKeys(ctx context.Context) ([]model.KeySummary, error) {
 }
 
 func (s *Service) GenerateKey(ctx context.Context, name string) (model.KeySummary, error) {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return model.KeySummary{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.KeySummary{}, err
 	}
@@ -244,11 +223,7 @@ func (s *Service) RenameKey(ctx context.Context, selector, name string) (model.K
 		return model.KeySummary{}, err
 	}
 
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return model.KeySummary{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.KeySummary{}, err
 	}
@@ -263,11 +238,7 @@ func (s *Service) RenameKey(ctx context.Context, selector, name string) (model.K
 }
 
 func (s *Service) ImportKey(ctx context.Context, name, keyPath string) (model.KeySummary, error) {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return model.KeySummary{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.KeySummary{}, err
 	}
@@ -287,11 +258,7 @@ func (s *Service) DeleteKey(ctx context.Context, selector string) (model.KeySumm
 		return model.KeySummary{}, err
 	}
 
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return model.KeySummary{}, err
-	}
-	client, err := s.clientFor(cfg)
+	client, err := s.clientFor()
 	if err != nil {
 		return model.KeySummary{}, err
 	}
@@ -340,49 +307,37 @@ func (s *Service) loadConfig() (config.Config, error) {
 	return config.Load(platform.DefaultConfigPath())
 }
 
-func (s *Service) clientFor(cfg config.Config) (*control.Client, error) {
-	network, address, err := platform.ControlEndpoint(cfg.Control.Path)
+func (s *Service) clientFor() (*control.Client, error) {
+	network, address, err := platform.ControlEndpoint(platform.DefaultControlPath())
 	if err != nil {
 		return nil, err
 	}
 	return control.NewClient(network, address), nil
 }
 
-func (s *Service) ensureDaemon(ctx context.Context, cfg config.Config) error {
-	client, err := s.clientFor(cfg)
+func (s *Service) ensureDaemon(ctx context.Context) (bool, error) {
+	client, err := s.clientFor()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var status model.DaemonStatus
 	if err := client.Call(ctx, control.ActionStatus, nil, &status); err == nil && status.Running {
-		return nil
+		return false, nil
 	} else if err != nil && !isDialError(err) {
-		return err
+		return false, err
 	}
-	if err := s.startDaemon(cfg); err != nil {
-		return err
+	if err := s.startDaemon(); err != nil {
+		return false, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		var current model.DaemonStatus
-		if callErr := client.Call(ctx, control.ActionStatus, nil, &current); callErr == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	return errors.New("daemon startup timeout")
+	return true, nil
 }
 
-func (s *Service) startDaemon(cfg config.Config) error {
+func (s *Service) startDaemon() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	network, address, err := platform.ControlEndpoint(cfg.Control.Path)
+	network, address, err := platform.ControlEndpoint(platform.DefaultControlPath())
 	if err != nil {
 		return err
 	}
@@ -391,7 +346,7 @@ func (s *Service) startDaemon(cfg config.Config) error {
 			return err
 		}
 	}
-	cmd := exec.Command(exe, "__daemon", "--control", cfg.Control.Path, "--vault", cfg.VaultPath)
+	cmd := exec.Command(exe, "__daemon")
 	cmd.Dir, _ = os.Getwd()
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
@@ -409,6 +364,27 @@ func (s *Service) startDaemon(cfg config.Config) error {
 		_ = cmd.Process.Release()
 	}
 	return nil
+}
+
+func retryDialError(ctx context.Context, timeout time.Duration, call func() error) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := call()
+		if err == nil {
+			return nil
+		}
+		if !isDialError(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return errDaemonNotReady
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func isDialError(err error) bool {

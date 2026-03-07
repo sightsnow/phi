@@ -53,21 +53,22 @@ After `phi unlock`, point `OpenSSH` to the local `phi` agent.
 
 ### Windows
 
-Add this to your SSH config. If your server uses a non-default port, add a `Port` line as needed:
+On Windows, the default pipe name is isolated per user. Run `phi status` after `phi unlock`, then use the reported `agent:` value.
+
+For `IdentityAgent` in `ssh_config` and VSCode Remote SSH, use `//./pipe/...` style:
 
 ```sshconfig
 Host appledev
     HostName me.sightsnow.cn
     User apple
-    IdentityAgent //./pipe/phi-agent
+    IdentityAgent //./pipe/phi-agent-<user-sid>
 ```
 
-Optional PowerShell session setup:
+For PowerShell `SSH_AUTH_SOCK`, use `\\.\pipe\...` style:
 
 ```powershell
-$env:SSH_AUTH_SOCK='\\.\pipe\phi-agent'
+$env:SSH_AUTH_SOCK='\\.\pipe\phi-agent-<user-sid>'
 ```
-
 ### Linux
 
 Set the agent socket explicitly:

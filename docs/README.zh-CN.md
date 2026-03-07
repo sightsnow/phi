@@ -53,21 +53,22 @@ phi key copy-pub -p PORT [name] apple@example.com
 
 ### Windows
 
-在 SSH 配置中加入。如果你的服务器使用非默认端口，再按需添加 `Port` 行：
+Windows 下默认 pipe 名会按当前用户隔离。执行 `phi unlock` 后先运行 `phi status`，再使用输出里的 `agent:` 值。
+
+在 `ssh_config` 和 VSCode Remote SSH 里，`IdentityAgent` 要写成 `//./pipe/...` 形式：
 
 ```sshconfig
 Host appledev
     HostName me.sightsnow.cn
     User apple
-    IdentityAgent //./pipe/phi-agent
+    IdentityAgent //./pipe/phi-agent-<user-sid>
 ```
 
-可选的 PowerShell 会话配置：
+在 PowerShell 的 `SSH_AUTH_SOCK` 里，使用 `\\.\pipe\...` 形式：
 
 ```powershell
-$env:SSH_AUTH_SOCK='\\.\pipe\phi-agent'
+$env:SSH_AUTH_SOCK='\\.\pipe\phi-agent-<user-sid>'
 ```
-
 ### Linux
 
 直接设置 agent socket：

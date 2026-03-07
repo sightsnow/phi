@@ -22,6 +22,7 @@ import (
 
 	"phi/internal/config"
 	"phi/internal/model"
+	"phi/internal/platform"
 	"phi/internal/store"
 	storesqlite "phi/internal/store/sqlite"
 )
@@ -99,7 +100,7 @@ func Status(ctx context.Context, cfg config.Config) (StatusResult, error) {
 
 	result := StatusResult{Backend: backendName(cfg)}
 
-	local, localErr := readLocalSnapshot(ctx, cfg.VaultPath)
+	local, localErr := readLocalSnapshot(ctx, platform.DefaultVaultPath())
 	remote, remoteErr := readRemoteSnapshot(ctx, client)
 
 	localMissing := isLocalSnapshotMissing(localErr)
@@ -127,7 +128,7 @@ func Push(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	local, err := readLocalSnapshot(ctx, cfg.VaultPath)
+	local, err := readLocalSnapshot(ctx, platform.DefaultVaultPath())
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func Once(ctx context.Context, cfg config.Config) (OnceResult, error) {
 		return OnceResult{}, err
 	}
 
-	local, localErr := readLocalSnapshot(ctx, cfg.VaultPath)
+	local, localErr := readLocalSnapshot(ctx, platform.DefaultVaultPath())
 	remote, remoteErr := readRemoteSnapshot(ctx, client)
 
 	localMissing := isLocalSnapshotMissing(localErr)
@@ -170,7 +171,7 @@ func Once(ctx context.Context, cfg config.Config) (OnceResult, error) {
 	case localMissing && remoteMissing:
 		return OnceResult{}, errors.New("nothing to sync: local vault not found and remote vault not found")
 	case localMissing:
-		if err := writeLocalVault(cfg.VaultPath, remote.Bytes); err != nil {
+		if err := writeLocalVault(platform.DefaultVaultPath(), remote.Bytes); err != nil {
 			return OnceResult{}, err
 		}
 		return OnceResult{Action: OncePull}, nil
@@ -187,7 +188,7 @@ func Once(ctx context.Context, cfg config.Config) (OnceResult, error) {
 		}
 		return OnceResult{Action: OncePush}, nil
 	case remote.Revision > local.Revision:
-		if err := writeLocalVault(cfg.VaultPath, remote.Bytes); err != nil {
+		if err := writeLocalVault(platform.DefaultVaultPath(), remote.Bytes); err != nil {
 			return OnceResult{}, err
 		}
 		return OnceResult{Action: OncePull}, nil
@@ -205,10 +206,10 @@ func Pull(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	local, err := readLocalSnapshot(ctx, cfg.VaultPath)
+	local, err := readLocalSnapshot(ctx, platform.DefaultVaultPath())
 	if err != nil {
 		if isLocalSnapshotMissing(err) {
-			return writeLocalVault(cfg.VaultPath, remote.Bytes)
+			return writeLocalVault(platform.DefaultVaultPath(), remote.Bytes)
 		}
 		return err
 	}
@@ -218,7 +219,7 @@ func Pull(ctx context.Context, cfg config.Config) error {
 	if local.Revision >= remote.Revision {
 		return fmt.Errorf("%w: local revision=%d remote revision=%d", ErrConflict, local.Revision, remote.Revision)
 	}
-	return writeLocalVault(cfg.VaultPath, remote.Bytes)
+	return writeLocalVault(platform.DefaultVaultPath(), remote.Bytes)
 }
 
 type s3Backend struct {
@@ -277,7 +278,7 @@ func newS3Backend(cfg config.Config) (backend, error) {
 	return &s3Backend{
 		client: client,
 		bucket: s3cfg.Bucket,
-		key:    remoteObjectName(cfg.VaultPath, s3cfg.Prefix),
+		key:    remoteObjectName(platform.DefaultVaultPath(), s3cfg.Prefix),
 	}, nil
 }
 
@@ -320,7 +321,7 @@ func newWebDAVBackend(cfg config.Config) (backend, error) {
 	if webdav.Endpoint == "" {
 		return nil, errors.New("sync.webdav.endpoint is required")
 	}
-	fileURL, err := buildWebDAVFileURL(webdav.Endpoint, webdav.Root, cfg.VaultPath)
+	fileURL, err := buildWebDAVFileURL(webdav.Endpoint, webdav.Root, platform.DefaultVaultPath())
 	if err != nil {
 		return nil, err
 	}

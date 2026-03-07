@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -129,7 +128,7 @@ func runInit(ctx context.Context, service *app.Service, args []string, stdout io
 		vaultState = "created"
 	}
 	fmt.Fprintf(stdout, "config: %s (%s)\n", configPath, configState)
-	fmt.Fprintf(stdout, "vault: %s (%s)\n", result.Config.VaultPath, vaultState)
+	fmt.Fprintf(stdout, "vault: %s (%s)\n", platform.DefaultVaultPath(), vaultState)
 	return nil
 }
 
@@ -320,16 +319,10 @@ func runSyncConfig(ctx context.Context, stdout io.Writer) error {
 }
 
 func runDaemon(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("__daemon", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	controlPath := platform.DefaultControlPath()
-	vaultPath := platform.DefaultVaultPath()
-	flags.StringVar(&controlPath, "control", controlPath, "control endpoint")
-	flags.StringVar(&vaultPath, "vault", vaultPath, "vault path")
-	if err := flags.Parse(args); err != nil {
+	if err := noExtraArgs(args); err != nil {
 		return err
 	}
-	return daemon.Run(ctx, controlPath, vaultPath)
+	return daemon.Run(ctx)
 }
 
 func portFlagRest(args []string) (int, []string, error) {
