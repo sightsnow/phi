@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 
+	vaultagent "phi/internal/agent"
 	"phi/internal/app"
 	"phi/internal/buildinfo"
 	"phi/internal/config"
@@ -84,6 +86,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintln(stdout, app.FormatStatus(status))
 		return nil
+	case "env":
+		return runEnv(ctx, service, args[1:], stdout)
 	case "version":
 		if err := noExtraArgs(args[1:]); err != nil {
 			return err
@@ -318,6 +322,28 @@ func runSyncConfig(ctx context.Context, stdout io.Writer) error {
 	return nil
 }
 
+func runEnv(ctx context.Context, service *app.Service, args []string, stdout io.Writer) error {
+	if err := noExtraArgs(args); err != nil {
+		return err
+	}
+
+	agentAddress := vaultagent.DefaultSocketPath(platform.DefaultControlPath())
+	status, err := service.Status(ctx)
+	if err == nil && status.AgentEnabled && status.AgentAddress != "" {
+		agentAddress = status.AgentAddress
+	}
+	if agentAddress == "" {
+		return errors.New("ssh agent socket is unavailable")
+	}
+
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(stdout, "$env:SSH_AUTH_SOCK=%s\n", quotePowerShell(agentAddress))
+		return nil
+	}
+	fmt.Fprintf(stdout, "export SSH_AUTH_SOCK=%s\n", quotePOSIXShell(agentAddress))
+	return nil
+}
+
 func runDaemon(ctx context.Context, args []string) error {
 	if err := noExtraArgs(args); err != nil {
 		return err
@@ -401,6 +427,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  lock                                 Lock the Vault and stop the local daemon and SSH agent")
 	fmt.Fprintln(w, "  passwd                               Change the Vault passphrase")
 	fmt.Fprintln(w, "  status                               Show daemon, unlock, control, and agent status")
+	fmt.Fprintln(w, "  env                                  Print a shell command that sets SSH_AUTH_SOCK")
 	fmt.Fprintln(w, "  version                              Show build version")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Key commands:")
@@ -477,4 +504,12 @@ func shortDigest(value string) string {
 		return value
 	}
 	return value[:16]
+}
+
+func quotePOSIXShell(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func quotePowerShell(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

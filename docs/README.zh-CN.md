@@ -77,6 +77,12 @@ $env:SSH_AUTH_SOCK='\\.\pipe\phi-agent-<user-sid>'
 export SSH_AUTH_SOCK="$HOME/.phi/agent.sock"
 ```
 
+或者让 `phi` 直接输出当前 shell 可执行的设置命令：
+
+```bash
+eval "$(phi env)"
+```
+
 或者写入 `~/.ssh/config`：
 
 ```sshconfig
@@ -113,6 +119,7 @@ phi sync pull
 - `phi lock` 锁定 Vault，并停止本地 daemon 和 SSH agent
 - `phi passwd` 修改 Vault 口令
 - `phi status` 查看 daemon、解锁状态、control 和 agent 状态
+- `phi env` 输出一条用于设置 `SSH_AUTH_SOCK` 的 shell 命令
 - `phi version` 查看构建版本
 
 ### 密钥

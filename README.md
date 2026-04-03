@@ -77,6 +77,12 @@ Set the agent socket explicitly:
 export SSH_AUTH_SOCK="$HOME/.phi/agent.sock"
 ```
 
+Or let `phi` print the command for your current shell:
+
+```bash
+eval "$(phi env)"
+```
+
 Or configure it in `~/.ssh/config`:
 
 ```sshconfig
@@ -113,6 +119,7 @@ phi sync pull
 - `phi lock` lock the Vault and stop the local daemon and SSH agent
 - `phi passwd` change the Vault passphrase
 - `phi status` show daemon, unlock, control, and agent status
+- `phi env` print a shell command that sets `SSH_AUTH_SOCK`
 - `phi version` show build version
 
 ### Keys
