@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -101,27 +103,58 @@ func (s *Service) handleUnlock(ctx context.Context, req control.Request) control
 	if err != nil {
 		return control.Errorf("decode unlock request: %v", err)
 	}
-	if len(payload.Passphrase) == 0 {
-		return control.Errorf("empty passphrase")
+	if err := s.unlockWithRequest(ctx, payload); err != nil {
+		return control.Errorf("%v", err)
+	}
+	return control.OK(s.status())
+}
+
+func (s *Service) unlockWithRequest(ctx context.Context, payload control.UnlockRequest) error {
+	var passphrase []byte
+	switch {
+	case payload.EncryptedPassphrase != "":
+		encrypted, err := base64.StdEncoding.DecodeString(payload.EncryptedPassphrase)
+		if err != nil {
+			return fmt.Errorf("decode encrypted passphrase: %w", err)
+		}
+		passphrase, err = platform.UnprotectForCurrentUser(encrypted)
+		if err != nil {
+			return fmt.Errorf("decrypt encrypted passphrase: %w", err)
+		}
+		defer crypto.Zero(passphrase)
+	case len(payload.Passphrase) != 0:
+		passphrase = payload.Passphrase
+		defer crypto.Zero(passphrase)
+	default:
+		return errors.New("empty passphrase")
 	}
 	vault, err := storesqlite.Open(s.vaultPath)
 	if err != nil {
-		return control.Errorf("open vault: %v", err)
+		return fmt.Errorf("open vault: %w", err)
 	}
 	defer vault.Close()
 
-	masterKey, err := vault.Unlock(ctx, payload.Passphrase)
+	masterKey, err := vault.Unlock(ctx, passphrase)
 	if err != nil {
-		return control.Errorf("unlock vault: %v", err)
+		return fmt.Errorf("unlock vault: %w", err)
 	}
 	defer crypto.Zero(masterKey)
 
 	s.session.Unlock(masterKey)
 	if err := s.startAgent(); err != nil {
 		s.session.Lock()
-		return control.Errorf("start agent: %v", err)
+		return fmt.Errorf("start agent: %w", err)
 	}
-	return control.OK(s.status())
+	return nil
+}
+
+func (s *Service) AutoUnlock(ctx context.Context, encryptedPassphrase string) error {
+	if encryptedPassphrase == "" {
+		return errors.New("empty encrypted passphrase")
+	}
+	return s.unlockWithRequest(ctx, control.UnlockRequest{
+		EncryptedPassphrase: encryptedPassphrase,
+	})
 }
 
 func (s *Service) handleListKeys(ctx context.Context) control.Response {

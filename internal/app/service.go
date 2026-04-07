@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -97,8 +99,18 @@ func (s *Service) Unlock(ctx context.Context, passphrase []byte) (model.DaemonSt
 		return model.DaemonStatus{}, err
 	}
 	var status model.DaemonStatus
+	req := control.UnlockRequest{Passphrase: passphrase}
+	if runtime.GOOS == "windows" && platform.Exists(platform.DefaultWindowsAutoUnlockPath()) {
+		encrypted, err := os.ReadFile(platform.DefaultWindowsAutoUnlockPath())
+		if err != nil {
+			return model.DaemonStatus{}, err
+		}
+		req = control.UnlockRequest{
+			EncryptedPassphrase: strings.TrimSpace(string(encrypted)),
+		}
+	}
 	call := func() error {
-		return client.Call(ctx, control.ActionUnlock, control.UnlockRequest{Passphrase: passphrase}, &status)
+		return client.Call(ctx, control.ActionUnlock, req, &status)
 	}
 	if started {
 		err = retryDialError(ctx, 5*time.Second, call)
@@ -140,6 +152,52 @@ func (s *Service) ChangePassphrase(ctx context.Context, passphrase []byte) error
 		return err
 	}
 	return nil
+}
+
+func (s *Service) ConfigureWindowsAutoUnlock(ctx context.Context, passphrase []byte, enabled bool) error {
+	_ = ctx
+	path := platform.DefaultWindowsAutoUnlockPath()
+	if enabled {
+		protected, err := platform.ProtectForCurrentUser(passphrase)
+		if err != nil {
+			return err
+		}
+		if err := platform.EnsureParentDir(path); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(protected)), 0o600)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) ConfigureWindowsLaunchAtLogin(enabled bool) error {
+	if enabled {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if err := platform.SetLaunchAtLogin(platform.DaemonAutoStartCommand(exe)); err != nil {
+			return err
+		}
+	} else {
+		if err := platform.DisableLaunchAtLogin(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) WindowsStartupStatus(ctx context.Context) (bool, bool, string, error) {
+	_ = ctx
+	autoUnlock := platform.Exists(platform.DefaultWindowsAutoUnlockPath())
+	enabled, command, err := platform.LaunchAtLoginEnabled()
+	if err != nil && runtime.GOOS == "windows" {
+		return false, false, "", err
+	}
+	return autoUnlock, enabled, command, nil
 }
 
 func (s *Service) AgentStatus(ctx context.Context) (control.AgentStatusResponse, error) {

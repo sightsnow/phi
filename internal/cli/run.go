@@ -42,11 +42,27 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if err := noExtraArgs(args[1:]); err != nil {
 			return err
 		}
-		passphrase, err := readPassphrase("Vault passphrase: ", stdout)
-		if err != nil {
-			return err
+		var passphrase []byte
+		if runtime.GOOS == "windows" {
+			autoUnlock, _, _, err := service.WindowsStartupStatus(ctx)
+			if err != nil {
+				return err
+			}
+			if !autoUnlock {
+				passphrase, err = readPassphrase("Vault passphrase: ", stdout)
+				if err != nil {
+					return err
+				}
+				defer crypto.Zero(passphrase)
+			}
+		} else {
+			var err error
+			passphrase, err = readPassphrase("Vault passphrase: ", stdout)
+			if err != nil {
+				return err
+			}
+			defer crypto.Zero(passphrase)
 		}
-		defer crypto.Zero(passphrase)
 		status, err := service.Unlock(ctx, passphrase)
 		if err != nil {
 			return err
@@ -98,6 +114,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runKey(ctx, service, args[1:], stdout)
 	case "sync":
 		return runSync(ctx, service, args[1:], stdout)
+	case "startup":
+		return runStartup(ctx, service, args[1:], stdout)
 	case "__daemon":
 		return runDaemon(ctx, args[1:])
 	default:
@@ -351,6 +369,93 @@ func runDaemon(ctx context.Context, args []string) error {
 	return daemon.Run(ctx)
 }
 
+func runStartup(ctx context.Context, service *app.Service, args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		printStartupUsage(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "help", "-h", "--help":
+		printStartupUsage(stdout)
+		return nil
+	case "status":
+		if err := noExtraArgs(args[1:]); err != nil {
+			return err
+		}
+		if runtime.GOOS != "windows" {
+			return errors.New("startup configuration is only available on windows")
+		}
+		autoUnlock, launchAtLogin, command, err := service.WindowsStartupStatus(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "windows auto unlock: %t\n", autoUnlock)
+		if autoUnlock {
+			fmt.Fprintf(stdout, "windows auto unlock file: %s\n", platform.DefaultWindowsAutoUnlockPath())
+		}
+		fmt.Fprintf(stdout, "windows launch at login: %t\n", launchAtLogin)
+		if launchAtLogin && command != "" {
+			fmt.Fprintf(stdout, "windows launch command: %s\n", command)
+		}
+		return nil
+	case "windows-auto-unlock":
+		if runtime.GOOS != "windows" {
+			return errors.New("windows auto unlock is only available on windows")
+		}
+		if len(args) != 2 {
+			return errors.New("usage: phi startup windows-auto-unlock <on|off>")
+		}
+		switch args[1] {
+		case "on":
+			passphrase, err := readPassphrase("Vault passphrase: ", stdout)
+			if err != nil {
+				return err
+			}
+			defer crypto.Zero(passphrase)
+			if err := service.ConfigureWindowsAutoUnlock(ctx, passphrase, true); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "windows auto unlock enabled")
+			return nil
+		case "off":
+			if err := service.ConfigureWindowsAutoUnlock(ctx, nil, false); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "windows auto unlock disabled")
+			return nil
+		default:
+			return errors.New("usage: phi startup windows-auto-unlock <on|off>")
+		}
+	case "windows-launch-at-login":
+		if runtime.GOOS != "windows" {
+			return errors.New("windows launch at login is only available on windows")
+		}
+		if len(args) != 2 {
+			return errors.New("usage: phi startup windows-launch-at-login <on|off>")
+		}
+		enabled := false
+		switch args[1] {
+		case "on":
+			enabled = true
+		case "off":
+			enabled = false
+		default:
+			return errors.New("usage: phi startup windows-launch-at-login <on|off>")
+		}
+		if err := service.ConfigureWindowsLaunchAtLogin(enabled); err != nil {
+			return err
+		}
+		if enabled {
+			fmt.Fprintln(stdout, "windows launch at login enabled")
+		} else {
+			fmt.Fprintln(stdout, "windows launch at login disabled")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown startup command %q", args[0])
+	}
+}
+
 func portFlagRest(args []string) (int, []string, error) {
 	var port int
 	var rest []string
@@ -447,9 +552,16 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  sync push                            Force upload the local Vault to the remote backend")
 	fmt.Fprintln(w, "  sync pull                            Force download the remote Vault to the local machine")
 	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Startup commands:")
+	fmt.Fprintln(w, "  startup status                       Show startup configuration")
+	fmt.Fprintln(w, "  startup windows-auto-unlock <on|off> Configure Windows DPAPI auto unlock")
+	fmt.Fprintln(w, "  startup windows-launch-at-login <on|off>")
+	fmt.Fprintln(w, "                                       Configure automatic daemon launch after Windows login")
+	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "More help:")
 	fmt.Fprintln(w, "  phi key help")
 	fmt.Fprintln(w, "  phi sync help")
+	fmt.Fprintln(w, "  phi startup help")
 }
 
 func printKeyUsage(w io.Writer) {
@@ -465,6 +577,16 @@ func printKeyUsage(w io.Writer) {
 	fmt.Fprintln(w, "                                       Copy the public key to the remote host's authorized_keys")
 	fmt.Fprintln(w, "  rename <id-or-name> <new-name>       Rename a stored key")
 	fmt.Fprintln(w, "  delete <id-or-name>                  Delete a stored key by id or name")
+}
+
+func printStartupUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  phi startup <command>")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  status                               Show startup configuration")
+	fmt.Fprintln(w, "  windows-auto-unlock <on|off>         Configure Windows DPAPI auto unlock")
+	fmt.Fprintln(w, "  windows-launch-at-login <on|off>     Configure daemon launch after Windows login")
 }
 
 func printSyncUsage(w io.Writer) {

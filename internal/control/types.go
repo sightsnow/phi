@@ -34,7 +34,8 @@ type Response struct {
 }
 
 type UnlockRequest struct {
-	Passphrase []byte `json:"passphrase"`
+	Passphrase          []byte `json:"passphrase,omitempty"`
+	EncryptedPassphrase string `json:"encrypted_passphrase,omitempty"`
 }
 
 type ImportKeyRequest struct {

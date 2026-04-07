@@ -24,6 +24,10 @@ func DefaultVaultPath() string {
 	return filepath.Join(AppDir(), "vault.phi")
 }
 
+func DefaultWindowsAutoUnlockPath() string {
+	return filepath.Join(AppDir(), "auto-unlock.dpapi")
+}
+
 func DefaultControlPath() string {
 	if runtime.GOOS == "windows" {
 		return "npipe://./pipe/" + defaultWindowsNamedPipeName("phi-control")

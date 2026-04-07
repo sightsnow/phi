@@ -92,6 +92,21 @@ Host work
     IdentityAgent ~/.phi/agent.sock
 ```
 
+## Windows Startup
+
+On Windows, `phi` can use `DPAPI` to unlock the Vault without prompting for the passphrase, and it can also start automatically after user login.
+
+```powershell
+phi startup windows-auto-unlock on
+phi startup windows-launch-at-login on
+phi startup status
+```
+
+- `windows-auto-unlock on` stores a `DPAPI`-protected secret in `$HOME/.phi/auto-unlock.dpapi`
+- If `auto-unlock.dpapi` exists, `phi unlock` and daemon startup use it directly and do not fall back to prompting for the passphrase
+- `windows-launch-at-login on` writes the current user's `Run` registry entry
+- `startup status` checks the auto-unlock file and the current `Run` registry entry directly
+
 ## Sync
 
 All sync operations are manual.
@@ -139,6 +154,12 @@ phi sync pull
 - `phi sync once` compare local and remote Vaults and perform one sync in the right direction
 - `phi sync push` force upload the local Vault to the remote backend
 - `phi sync pull` force download the remote Vault to the local machine
+
+### Startup
+
+- `phi startup status` show Windows auto-unlock and login-start status
+- `phi startup windows-auto-unlock <on|off>` configure `DPAPI` auto unlock
+- `phi startup windows-launch-at-login <on|off>` configure daemon launch after Windows login
 
 ## Build
 

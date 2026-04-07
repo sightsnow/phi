@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 
 	"phi/internal/control"
 	"phi/internal/platform"
@@ -44,5 +45,20 @@ func Run(ctx context.Context) error {
 		ControlNetwork: network,
 		ControlAddress: address,
 	}, cancel)
+	if err := autoUnlockIfConfigured(runCtx, service); err != nil {
+		return err
+	}
 	return control.Serve(runCtx, listener, service)
+}
+
+func autoUnlockIfConfigured(ctx context.Context, service *Service) error {
+	path := platform.DefaultWindowsAutoUnlockPath()
+	if !platform.Exists(path) {
+		return nil
+	}
+	encrypted, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return service.AutoUnlock(ctx, strings.TrimSpace(string(encrypted)))
 }

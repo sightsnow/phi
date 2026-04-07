@@ -92,6 +92,21 @@ Host work
     IdentityAgent ~/.phi/agent.sock
 ```
 
+## Windows 启动配置
+
+在 Windows 下，`phi` 可以通过 `DPAPI` 实现免输入主密钥解锁，也可以配置为用户登录后自动启动。
+
+```powershell
+phi startup windows-auto-unlock on
+phi startup windows-launch-at-login on
+phi startup status
+```
+
+- `windows-auto-unlock on` 会把受 `DPAPI` 保护的密文保存到 `$HOME/.phi/auto-unlock.dpapi`
+- 只要 `auto-unlock.dpapi` 存在，`phi unlock` 和 daemon 启动时都会直接使用它，不再回退提示输入主密钥
+- `windows-launch-at-login on` 会写入当前用户的 `Run` 注册表项
+- `startup status` 会直接检查自动解锁文件和当前用户的 `Run` 注册表项
+
 ## 同步
 
 所有同步操作都是手动的。
@@ -139,6 +154,12 @@ phi sync pull
 - `phi sync once` 比较本地和远端 Vault，并自动选择方向执行一次同步
 - `phi sync push` 强制把本地 Vault 上传到远端
 - `phi sync pull` 强制把远端 Vault 下载到本地
+
+### 启动
+
+- `phi startup status` 查看 Windows 自动解锁和登录后自动启动状态
+- `phi startup windows-auto-unlock <on|off>` 配置 `DPAPI` 自动解锁
+- `phi startup windows-launch-at-login <on|off>` 配置 Windows 登录后自动启动 daemon
 
 ## 构建
 
